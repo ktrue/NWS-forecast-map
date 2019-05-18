@@ -31,9 +31,9 @@
 # if you are using www.mapbox.com for map tiles, you
 # need to acquire an API ke from that service
 #
-#  put this in the CALLING page for quake-json.php script:
+#  put this in the CALLING page for NWS-forecast-map.php script:
 /*
-  $mapboxAPIkey = '-replace-this-with-your-API-key-here-'; 
+  $setMapboxAPIkey = '-replace-this-with-your-API-key-here-'; 
 */
 # Note: if using the Saratoga template set, put a new entry in Settings.php
 /*
