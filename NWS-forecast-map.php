@@ -8,7 +8,10 @@
 #  for the data (instead of Google map/forecast.weather.gov/MapClick.php XML)
 #  by Ken True - webmaster@saratoga-weather.org
 #
-#  NWS-forecast-map.php - V2.00 - 18-May-2019 - initial release
+#  NWS-forecast-map.php - 18-May-2019 - initial release
+# 
+#  Version 2.00 - 18-May-2019 - initial release
+#  Version 2.10 - 19-May-2019 - added display of County Zone alerts and map polygons (where provided)
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -95,7 +98,7 @@ if (isset($_REQUEST['sce']) && strtolower($_REQUEST['sce']) == 'view' ) {
    exit;
 }
 // overrides from Settings.php if available
-if(file_exists("Settings.php")) {include_once("Settings.php");}
+// if(file_exists("Settings.php")) {include_once("Settings.php");}
 //if(file_exists("common.php"))   {include_once("common.php");}
 global $SITE;
 if (isset($SITE['latitude'])) 	     {$myLat = $SITE['latitude'];}
@@ -117,7 +120,7 @@ if (isset($setTimeFormat))      { $timeFormat = $setTimeFormat; }
 if (isset($setMapProvider))     { $mapProvider = $setMapProvider; }
 if (isset($setMapboxAPIkey))    { $mapboxAPIkey = $setMapboxAPIkey; }
 // ------ start of code -------
-
+define('NWS_DETAIL_PRODUCT_URL','https://alerts-v2.weather.gov/products/'); // api site still beta
 if(!isset($mapboxAPIkey)) {
 	$mapboxAPIkey = '--mapbox-API-key--';
 }
@@ -209,7 +212,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.00 - 18-May-2019 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.10 - 19-May-2019 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -223,6 +226,24 @@ if(isset($_REQUEST['map'])) {
 }
 $doDebug = isset($_REQUEST['debug'])?true:false;
 
+# for easy testing (part 1)
+if(isset($_REQUEST['latlong'])) {
+	$t = $_REQUEST['latlong'];
+	if(preg_match('!^([\d\.]+),-([\d\.]+)$!',$t,$m)) {
+		$centerlat = $m[1];
+		$centerlong= $m[2];
+		$centerlong= 0.0-$centerlong;
+		$Status .= "<!-- using latlong=$centerlat,$centerlong -->\n";
+	}
+}
+# for easy testing (part 2)
+if(isset($_REQUEST['lat']) and is_numeric($_REQUEST['lat']) and
+   isset($_REQUEST['lon']) and is_numeric($_REQUEST['lon']) ) {
+		 $centerlat = $_REQUEST['lat'];
+		 $centerlong= $_REQUEST['lon'];
+		 $Status .= "<!-- using lat=$centerlat and long=$centerlong -->\n";
+}
+	 
 $pointHTML = WXmap_fetchUrlWithoutHanging('https://api.weather.gov/points/'.$centerlat.','.$centerlong);
   $stuff = explode("\r\n\r\n",$pointHTML); // maybe we have more than one header due to redirects.
   $content = (string)array_pop($stuff); // last one is the content
@@ -238,6 +259,7 @@ if($lastRC == '200') { // got a good return .. process
 	
 	$fcstURL = $pointJSON['forecast'];
 	$fcstZoneURL = $pointJSON['forecastZone'];
+	$countyZoneURL = $pointJSON['county'];
 	$cityname = $pointJSON['relativeLocation']['city'];
 	$statename= $pointJSON['relativeLocation']['state'];
 	$TZ       = $pointJSON['timeZone'];
@@ -313,6 +335,8 @@ if(isset($fcstURL)) { // try only if the gridpoint URL was found
 	}
 }
 
+list($alertsList,$alertsJS) = WXmap_get_alerts($countyZoneURL);
+
 if(!isset($zoom)) {$zoom = 11;}
 print $Status;
 
@@ -328,7 +352,7 @@ print $Status;
 <table width="611" cellspacing="3" cellpadding="3" style="color:black; line-height:1.2em; margin: 0px auto 0px auto; border:solid 4px #006699; background-color:#FFF">
  <tr>
   <td colspan="3">
-   <div style="margin: 6px auto 0px auto; text-align:center; width:570px; height:360px; border: outset #777 3px;" title="Double-Click the location to get the latest forecast" id="map_canvas">
+   <div style="margin: 6px auto 0px auto; text-align:center; width:570px; height:360px; border: outset #777 3px;" id="map_canvas">
     <noscript>
      <p><span style="font-size:14px;">Your JavaScript is disabled and preventing the map to load for you.</span></p>
      <p>Enable your JavaScript in your browser to view the map and select a forecast for any US location.</p>
@@ -336,7 +360,7 @@ print $Status;
     <?php echo $errorMessage; ?>
    </div>
    <div style="text-align:center; font-size:12px;margin-top: 5px;">
-     <span style="color:red;font-size:large;font-weight:bolder;">&#9744; </span> Red box outlines the forecast area</div>
+     <span style="color:#009900;font-size:large;font-weight:bolder;">&#9744; </span> Green box outlines the forecast area</div>
   </td>
  </tr>
  <tr>
@@ -363,7 +387,15 @@ print $Status;
   <td colspan="3" style="padding-bottom: 6px; text-align:center; font-size: 0.8em">Updated <?php echo $updateTime;?></td>
  </tr>
 </table>
-
+<?php if(!empty($alertsList)) { // show the alerts box ?>
+<table border="0" width="622" style="margin:5px auto 0px auto;border: thick solid red; background-color: #FF9;">
+ <tr>
+  <td class="alertbox" style="text-align: center;">
+    <?php echo $alertsList; ?>
+  </td>
+</tr>
+</table>
+<?php } // end alert summary display ?>
 <?php
 // Generate the detailed forecasts from the gridpoint info:
 /*
@@ -529,7 +561,7 @@ var selMap = '<?php echo $mSelMapName; ?>';
   L.control.layers(baseLayers).addTo(map);
 
 // draw the gridpoint forecast area as a polygon
-  var polyc0 = [
+  var polyfa = [
 <?php
   foreach ($poly as $i => $coords) {
 		list($longP,$latP) = explode(' ',$coords);
@@ -538,20 +570,21 @@ var selMap = '<?php echo $mSelMapName; ?>';
 ?>
   ];
 	
- var mapoly0 = new L.polygon(polyc0,{
+ var mapolyfa = new L.polygon(polyfa,{
   opacity: 1.0,
-  color: "#DF0101",
+  color: "#009900",
   strokeOpacity: 0.9,
   weight: 2.5,
-  fillColor: "#DF0101",
+  fillColor: "#7FF378",
   fillOpacity: 0.20,
 	title: "Forecast Area"
  }).addTo(map);
 
-  mapoly0.bindTooltip("Forecast Area for <?php echo "$distanceFrom$cityname"; ?>", 
+  mapolyfa.bindTooltip("Forecast Area for <?php echo "$distanceFrom$cityname"; ?>", 
    { sticky: true,
      direction: "auto"
    });
+<?php if(!empty($alertsJS)) { print $alertsJS; } ?>
 
 // display mouse lat/long in page as mouse moves	 
  function mouseMove (e) {
@@ -779,3 +812,113 @@ function WXmap_fetch_microtime()
 }
 
 // ------------------------------------------------------------------------------------------
+
+function WXmap_get_alerts($countyURL) {
+	# get/decode the alerts (if any) and return 
+	# strings $alertsList for display and $alertsJS for polygons on the map
+	$alertURL = str_replace('zones/county','alerts/active/zone',$countyURL);
+	global $Status,$doDebug;
+	
+	$Status .= "<!-- fetching County alerts -->\n";
+	
+  $alertHTML = WXmap_fetchUrlWithoutHanging($alertURL);
+  $stuff = explode("\r\n\r\n",$alertHTML); // maybe we have more than one header due to redirects.
+  $content = (string)array_pop($stuff); // last one is the content
+  $headers = (string)array_pop($stuff); // next-to-last-one is the headers
+  preg_match('/HTTP\/\S+ (\d+)/', $headers, $m);
+	//$Status .= "<!-- m=".print_r($m,true)." -->\n";
+	//$Status .= "<!-- html=".print_r($html,true)." -->\n";
+	if(!isset($m[1])) {
+		$Status .= "<!-- failed to fetch $alertURL to process -->\n";
+	  return(array('Error: alert data not available',''));
+	}
+		
+	$lastRC = (string)$m[1];
+
+  if($lastRC !== '200') { // no data to process
+		$Status .= "<!-- no alerts to process -->\n";
+	  return(array('',''));
+	}
+
+	$AJSON = json_decode($content,true);
+	if($doDebug) {$Status .= "<!-- alert JSON\n".print_r($AJSON,true)." -->\n"; }
+	
+	if(!isset($AJSON['@graph'][0])) {
+		$Status .= "<!-- no alerts found at $alertURL -->\n";
+	  return(array('',''));
+	}
+	
+	$A = "";
+	$JS = '';
+  $colors = array('#DF0101','#F79F81','#F2F5A9','#0174DF','#58FAD0',
+                  '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC');
+	
+	foreach($AJSON['@graph'] as $i => $J) {
+		if(isset($J['expires'])) {
+			$exp = strtotime($J['expires']);
+			$Status .= "<!-- expires '".$J['expires']. "' ";
+			if(time() > $exp) {
+				$Status .= " EXPIRED. -->\n";
+				continue;
+			} else {
+				$Status .= " still active. -->\n";
+			}
+		}
+		// generate the text and link
+		if(isset($J['headline']) and isset($J['description'])) {
+			$desc = $J['description'];
+			$headline = preg_replace('| by .*$|i','',$J['headline']);
+			$product = $J['id'];
+			$url = NWS_DETAIL_PRODUCT_URL.$product;
+			$A .= '<b><a href="'.$url.'" title="'.$desc.'">'.$headline."</a></b><br/>\n";
+			$Status .= "<!-- alert $i='".$J['headline']."' found expires='".$J['expires']."' -->\n";
+		}
+		// process map defs
+		if(isset($J['geometry'])) {
+			if(preg_match('|POLYGON\(\(([^\)]+)\)\)|i',$J['geometry'],$m)) {
+				$poly = explode(',',$m[1]); // generate map polygon
+				$Status .= "<!-- alert poly \n".print_r($poly,true)." -->\n";
+				$cs = $i;
+        $cc = count($colors);
+        if(!isset($colors[$cs])) {$tr = range(0,$cs); shuffle($tr); $cs = $tr[0];}
+        $rc = $colors[$cs];
+				$id = $i+1;
+$JS .= '					
+  var poly'.$id.' = [
+';
+				foreach ($poly as $i => $coords) {
+					list($longP,$latP) = explode(' ',$coords);
+					$JS .= "  [$latP,$longP],\n";
+				}
+				$tooltip = '<b>'.str_replace(' issued ',"</b><br>issued ",$J['headline']);
+				$tooltip = str_replace(' until ','<br/>&nbsp;&nbsp;&nbsp;until ',$tooltip);
+				$tooltip = str_replace(' by ','<br/> by ',$tooltip);
+$JS .= '
+  ];
+	
+ var mapoly'.$id.' = new L.polygon(poly'.$id.',{
+  opacity: 1.0,
+  color: "'.$rc.'",
+  strokeOpacity: 0.9,
+  weight: 2.5,
+  fillColor: "'.$rc.'",
+  fillOpacity: 0.20,
+	title: "'.$J['event'].'"
+ }).addTo(map);
+
+  mapoly'.$id.'.bindTooltip("'.$tooltip.'", 
+   { sticky: true,
+     direction: "auto"
+   });
+';				
+									  
+	  } else {
+				$Status.= "<!-- no coordinates found -->\n";
+	  }// end polygon generation	
+	} // end JS generation
+		
+		
+	} // end process alerts
+	
+	return(array($A,$JS));
+}
