@@ -21,9 +21,11 @@ A Mapbox API key is OPTIONAL .. you do not need it to use maps from 5 included f
 
 ## Script operation
 
-The script will make two API calls to api.weather.gov when a forecast is loaded (either at script initialization, or a double-click on a point on the displayed map).  Changing the basemap tiles, zoom-in/zoom-out or scrolling the map does not result in API calls to api.weather.gov
+The script will make three API calls to api.weather.gov when a forecast is loaded (either at script initialization, or a double-click on a point on the displayed map).  Changing the basemap tiles, zoom-in/zoom-out or scrolling the map does not result in API calls to api.weather.gov
 
-The first API request is for /points/&lt;latitude>,&lt;longitude> and the resulting JSON is used to fetch the /gridpoints/&lt;<WFO>/&lt;gridpointX>,&lt;gridpointY>/forecast which contains the actual forecast for that area.
+The first API request is for **/points/&lt;latitude>,&lt;longitude>** and the resulting JSON is used to fetch the **/gridpoints/&lt;<WFO>/&lt;gridpointX>,&lt;gridpointY>/forecast** which contains the actual forecast for that area.
+The third API call is to **/alerts/active/zone/&lt;CountyZone>** to get/format any active weather alerts for the county.
+If any are found, the text summary of the alert is presented in a red-outlined box below the map.  A mouseover will display the details, and a click will go to the weather.gov page with the full alert.  If the alert provided a geometry polygon, then that polygon will be drawn on the map (in addition to the outline of the forecast area).
 
 Note that NO CACHING is done on the results, and the weather icons displayed in the table below the map are directly from api.weather.gov.
 
@@ -123,6 +125,10 @@ and put the following in the main display section of your page:
 
 ?>
 ```
-## Sample Output
+## Sample Output (no alert active)
 
 <img src="./sample-output.png" alt="Sample output"/>
+
+## Sample Output (several alerts active)
+
+<img src="./sample-output-alerts.png" alt="Sample output with alerts showing"/>

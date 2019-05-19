@@ -3,6 +3,7 @@
  (c) 2010-2019 Vladimir Agafonkin, (c) 2010-2011 CloudMade
  This is leaflet.css appended with the marker-clusterer css 
 // Version 2.00 - 18-May-2019 - initial release with Leaflet map
+// Version 2.10 - 19-May-2019 - minor change for tooltip readibility
 */
 /* required styles */
 
@@ -567,8 +568,8 @@
 	user-select: none;
 	pointer-events: none;
 	box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-  font-size: xx-small; /* kt mod */
-  line-height: 0.8em;  /* kt mod */
+  font-size: x-small; /* kt mod */
+  line-height: 0.9em;  /* kt mod */
 	}
 .leaflet-tooltip.leaflet-clickable {
 	cursor: pointer;
