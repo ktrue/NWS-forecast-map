@@ -12,6 +12,7 @@
 # 
 #  Version 2.00 - 18-May-2019 - initial release
 #  Version 2.10 - 19-May-2019 - added display of County Zone alerts and map polygons (where provided)
+#  Version 2.20 - 14-Jul-2020 - switched to geo+json from ld+json calls to api.weather.gov
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -120,7 +121,7 @@ if (isset($setTimeFormat))      { $timeFormat = $setTimeFormat; }
 if (isset($setMapProvider))     { $mapProvider = $setMapProvider; }
 if (isset($setMapboxAPIkey))    { $mapboxAPIkey = $setMapboxAPIkey; }
 // ------ start of code -------
-define('NWS_DETAIL_PRODUCT_URL','https://alerts-v2.weather.gov/products/'); // api site still beta
+define('NWS_DETAIL_PRODUCT_URL','https://alerts-v2.weather.gov/#/?id='); // api site still beta // Jasiu fix 10-May-2020
 if(!isset($mapboxAPIkey)) {
 	$mapboxAPIkey = '--mapbox-API-key--';
 }
@@ -212,7 +213,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.10 - 19-May-2019 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.20 - 16-Jul-2020 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -245,32 +246,35 @@ if(isset($_REQUEST['lat']) and is_numeric($_REQUEST['lat']) and
 }
 	 
 $pointHTML = WXmap_fetchUrlWithoutHanging('https://api.weather.gov/points/'.$centerlat.','.$centerlong);
+	$long = round($centerlong,4);
+	$lat  = round($centerlat,4);
   $stuff = explode("\r\n\r\n",$pointHTML); // maybe we have more than one header due to redirects.
   $content = (string)array_pop($stuff); // last one is the content
   $headers = (string)array_pop($stuff); // next-to-last-one is the headers
   preg_match('/HTTP\/\S+ (\d+)/', $headers, $m);
 	//$Status .= "<!-- m=".print_r($m,true)." -->\n";
 	//$Status .= "<!-- html=".print_r($html,true)." -->\n";
-	$lastRC = (string)$m[1];
+	if(isset($m[1])) {$lastRC = (string)$m[1];} else {$lastRC = '0';}
 
 if($lastRC == '200') { // got a good return .. process
-	$pointJSON = json_decode($content,true);
-	if($doDebug) {$Status .= "<!-- Point content\n".print_r($content,true)." -->\n";}
+	$rawpointJSON = json_decode($content,true);
+	$pointJSON = $rawpointJSON['properties'];
+	if($doDebug) {$Status .= "<!-- Point content\n".var_export($pointJSON,true)." -->\n";}
 	
 	$fcstURL = $pointJSON['forecast'];
 	$fcstZoneURL = $pointJSON['forecastZone'];
 	$countyZoneURL = $pointJSON['county'];
-	$cityname = $pointJSON['relativeLocation']['city'];
-	$statename= $pointJSON['relativeLocation']['state'];
+	$cityname = $pointJSON['relativeLocation']['properties']['city'];
+	$statename= $pointJSON['relativeLocation']['properties']['state'];
 	$TZ       = $pointJSON['timeZone'];
 	date_default_timezone_set($TZ);
 	$distanceFrom = '';
-	if (isset($pointJSON['relativeLocation']['distance']['value'])) {
-		$distance = $pointJSON['relativeLocation']['distance']['value'];
+	if (isset($pointJSON['relativeLocation']['properties']['distance']['value'])) {
+		$distance = $pointJSON['relativeLocation']['properties']['distance']['value'];
 		$distance = floor(0.000621371 * $distance); // truncate to nearest whole mile
 		$Status.= "<!-- distance=$distance from " . $cityname . " -->\n";
 		if ($distance >= 2) {
-			$angle = $pointJSON['relativeLocation']['bearing']['value'];
+			$angle = $pointJSON['relativeLocation']['properties']['bearing']['value'];
 			$compass = array('N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW');
 			$direction = $compass[round($angle / 22.5) % 16];
 			$t = $distance . ' ';
@@ -302,13 +306,14 @@ if(isset($fcstURL)) { // try only if the gridpoint URL was found
   preg_match('/HTTP\/\S+ (\d+)/', $headers, $m);
 	//$Status .= "<!-- m=".print_r($m,true)." -->\n";
 	//$Status .= "<!-- html=".print_r($html,true)." -->\n";
-	$lastRC = (string)$m[1];
-	if($doDebug) {$Status .= "<!-- gridpoint content\n".print_r($content,true)." -->\n";}
+	if(isset($m[1])) {$lastRC = (string)$m[1]; } else { $lastRC = '0'; }
   if($lastRC == '200') {
 	
-		$gridpointJSON = json_decode($content,true);
+		$rawgridpointJSON = json_decode($content,true);
+		$gridpointJSON = $rawgridpointJSON['properties'];
+	  if($doDebug) {$Status .= "<!-- gridpoint content\n".var_export($gridpointJSON,true)." -->\n";}
 		$updateTime = date($timeFormat,strtotime($gridpointJSON["updateTime"]));
-	
+/* ld+json extract	
 		if(isset($gridpointJSON['geometry'])) {
 			$g = $gridpointJSON['geometry'];
 		# "geometry": "GEOMETRYCOLLECTION(POINT(-122.0220167 37.2668315),POLYGON((-122.0385572 37.275548,-122.0330058 37.2536879,-122.005479 37.2581132,-122.011025 37.2799738,-122.0385572 37.275548)))",
@@ -323,10 +328,19 @@ if(isset($fcstURL)) { // try only if the gridpoint URL was found
 			if(preg_match('|POLYGON\(\(([^\)]+)\)\)|i',$g,$m)) {
 				$poly = explode(',',$m[1]);
 			}
-			
+*/			
 		}
-		if($doDebug) {$Status .= "<!-- lat=$lat long=$long poly=".print_r($poly,true)." -->\n";}
+
+	$poly = array();
+  if(isset($rawgridpointJSON['geometry']['coordinates'][0])) {
+	  if($doDebug) {$Status .= "<!-- gridpoint geometry\n".var_export($rawgridpointJSON['geometry']['coordinates'][0],true)." -->\n";}
+		foreach ($rawgridpointJSON['geometry']['coordinates'][0] as $i => $coords) {
+			$poly[] = $coords[0].' '.$coords[1];
+		}
+		
+		if($doDebug) {$Status .= "<!-- lat=$lat long=$long poly=".var_export($poly,true)." -->\n"; }
 	} else {
+
 		$errorMessage .= "<h2>Oops... unable to fetch the gridpoint forecast data RC=$lastRC.<br/>" .
 										"Please try again later</h2>";
 		$updateTime= 'n/a';
@@ -653,7 +667,9 @@ function WXmap_fetchUrlWithoutHanging($inurl)
 //    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:58.0) Gecko/20100101 Firefox/58.0');
     curl_setopt($ch, CURLOPT_HTTPHEADER, // request LD-JSON format
     array(
-      "Accept: application/ld+json"
+      "Accept: application/geo+json",
+			"Cache-control: no-cache",
+			"Pragma: akamai-x-cache-on, akamai-x-get-request-id"
     ));
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $numberOfSeconds); //  connection timeout
     curl_setopt($ch, CURLOPT_TIMEOUT, $numberOfSeconds); //  data timeout
@@ -766,8 +782,10 @@ function WXmap_fetchUrlWithoutHanging($inurl)
         'header' => "Cache-Control: no-cache, must-revalidate\r\n" . 
 					"Cache-control: max-age=0\r\n" . 
 					"Connection: close\r\n" . 
-					"User-agent: Mozilla/5.0 (wxForecastMap.php - saratoga-weather.org)\r\n" . 
-					"Accept: application/ld+json\r\n"
+					"User-agent: Mozilla/5.0 (NWS-forecast-map.php - saratoga-weather.org)\r\n" . 
+					"Accept: application/geo+json\r\n",
+					"Cache-control: no-cache\r\n",
+					"Pragma: akamai-x-cache-on, akamai-x-get-request-id\r\n"
       ) ,
       'ssl' => array(
         'method' => "GET",
@@ -776,8 +794,10 @@ function WXmap_fetchUrlWithoutHanging($inurl)
         'header' => "Cache-Control: no-cache, must-revalidate\r\n" . 
 					"Cache-control: max-age=0\r\n" . 
 					"Connection: close\r\n" . 
-					"User-agent: Mozilla/5.0 (wxForecastMap.php - saratoga-weather.org)\r\n" . 
-					"Accept: application/ld+json\r\n"
+					"User-agent: Mozilla/5.0 (NWS-forecast-map.php - saratoga-weather.org)\r\n" . 
+					"Accept: application/geo+json\r\n",
+					"Cache-control: no-cache\r\n",
+					"Pragma: akamai-x-cache-on, akamai-x-get-request-id\r\n"
       )
     );
     $STRcontext = stream_context_create($STRopts);
@@ -841,9 +861,9 @@ function WXmap_get_alerts($countyURL) {
 	}
 
 	$AJSON = json_decode($content,true);
-	if($doDebug) {$Status .= "<!-- alert JSON\n".print_r($AJSON,true)." -->\n"; }
+	if($doDebug) {$Status .= "<!-- alert JSON\n".var_export($AJSON,true)." -->\n"; }
 	
-	if(!isset($AJSON['@graph'][0])) {
+	if(!isset($AJSON['features'][0])) {
 		$Status .= "<!-- no alerts found at $alertURL -->\n";
 	  return(array('',''));
 	}
@@ -853,7 +873,8 @@ function WXmap_get_alerts($countyURL) {
   $colors = array('#DF0101','#F79F81','#F2F5A9','#0174DF','#58FAD0',
                   '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC');
 	
-	foreach($AJSON['@graph'] as $i => $J) {
+	foreach($AJSON['features'] as $i => $rJ) {
+		$J = $rJ['properties'];
 		if(isset($J['expires'])) {
 			$exp = strtotime($J['expires']);
 			$Status .= "<!-- expires '".$J['expires']. "' ";
@@ -874,10 +895,14 @@ function WXmap_get_alerts($countyURL) {
 			$Status .= "<!-- alert $i='".$J['headline']."' found expires='".$J['expires']."' -->\n";
 		}
 		// process map defs
-		if(isset($J['geometry'])) {
-			if(preg_match('|POLYGON\(\(([^\)]+)\)\)|i',$J['geometry'],$m)) {
-				$poly = explode(',',$m[1]); // generate map polygon
-				$Status .= "<!-- alert poly \n".print_r($poly,true)." -->\n";
+		if(isset($rJ['geometry']['coordinates'][0])) {
+			if(true or preg_match('|POLYGON\(\(([^\)]+)\)\)|i',$J['geometry'],$m)) {
+				$poly = array();
+				foreach ($rJ['geometry']['coordinates'][0] as $i => $coords) {
+					$poly[] = $coords[0].' '.$coords[1];
+				}
+				
+				$Status .= "<!-- alert poly \n".var_export($poly,true)." -->\n";
 				$cs = $i;
         $cc = count($colors);
         if(!isset($colors[$cs])) {$tr = range(0,$cs); shuffle($tr); $cs = $tr[0];}
