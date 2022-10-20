@@ -13,6 +13,7 @@
 #  Version 2.00 - 18-May-2019 - initial release
 #  Version 2.10 - 19-May-2019 - added display of County Zone alerts and map polygons (where provided)
 #  Version 2.20 - 14-Jul-2020 - switched to geo+json from ld+json calls to api.weather.gov
+#  Version 2.30 - 20-Oct-2022 - added adjustment of -1,-1 to gridpoint forecast for problem WFOs
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -213,7 +214,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.20 - 16-Jul-2020 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.30 - 20-Oct-2022 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -244,6 +245,22 @@ if(isset($_REQUEST['lat']) and is_numeric($_REQUEST['lat']) and
 		 $centerlong= $_REQUEST['lon'];
 		 $Status .= "<!-- using lat=$centerlat and long=$centerlong -->\n";
 }
+
+# for easy testing (part 3) - fudge the gridpoint number
+if(isset($_REQUEST['adj'])) {
+	$t = $_REQUEST['adj'];
+	if(preg_match('!^([\-\d\.]+),([\-\d\.]+)$!',$t,$m)) {
+		$adj1 = $m[1];
+		$adj2 = $m[2];
+		$Status .= "<!-- using adj=$adj1,$adj2 -->\n";
+	}
+} else {
+	$adj1 = 0;
+	$adj2 = 0;
+}
+
+# listing of current WFO gridpoint forecasts with +1,+1 offsets to correct  20-Oct-2022
+$offByOne = array('AFC','AER','ALU','AFG','AJK','BOX','CAE','DLH','FSD','HGX','HNX','LIX','LWX','MAF','MFR','MLB','MRX','MTR');
 	 
 $pointHTML = WXmap_fetchUrlWithoutHanging('https://api.weather.gov/points/'.$centerlat.','.$centerlong);
 	$long = round($centerlong,4);
@@ -259,9 +276,23 @@ $pointHTML = WXmap_fetchUrlWithoutHanging('https://api.weather.gov/points/'.$cen
 if($lastRC == '200') { // got a good return .. process
 	$rawpointJSON = json_decode($content,true);
 	$pointJSON = $rawpointJSON['properties'];
+	$gridPointMeta = $pointJSON['gridId'].'/'.$pointJSON['gridX'].','.$pointJSON['gridY'];
+	
 	if($doDebug) {$Status .= "<!-- Point content\n".var_export($pointJSON,true)." -->\n";}
 	
 	$fcstURL = $pointJSON['forecast'];
+	$ngpID = $pointJSON['gridId'];
+	if(in_array($ngpID,$offByOne)) {
+		print "<!-- WFO=$ngpID is +1,+1 offset, adjusted down by -1,-1 -->\n";
+		$adj1 = -1;
+		$adj2 = -1;
+	}
+	$ngpX  = $pointJSON['gridX']+$adj1;
+	$ngpY  = $pointJSON['gridY']+$adj2;
+	
+	$fcstURL = "https://api.weather.gov/gridpoints/$ngpID/$ngpX,$ngpY/forecast";
+	$gridPointMeta = $ngpID.'/'.$ngpX.','.$ngpY;
+	           
 	$fcstZoneURL = $pointJSON['forecastZone'];
 	$countyZoneURL = $pointJSON['county'];
 	$cityname = $pointJSON['relativeLocation']['properties']['city'];
@@ -598,6 +629,22 @@ var selMap = '<?php echo $mSelMapName; ?>';
    { sticky: true,
      direction: "auto"
    });
+	 
+	var markerImageGreen  = new L.icon({ 
+		iconUrl: "./ajax-images/mma_20_green.png",
+		iconSize: [12, 20],
+		iconAnchor: [6, 20]
+    });
+	var marker = new L.marker(new L.LatLng(<?php echo $centerlat;?>,<?php echo $centerlong;?>),{
+		clickable: true,
+		draggable: false,
+		icon: markerImageGreen,
+		title: "Selected location at <?php echo $centerlat;?>,<?php echo $centerlong;?>"+
+		       "\n(/gridpoints/<?php echo $gridPointMeta; ?>/forecast bounding box shown)"+
+					 "\nadjustment of <?php echo $adj1; ?>,<?php echo $adj2; ?> gridpoint used"
+	});
+  map.addLayer(marker);
+
 <?php if(!empty($alertsJS)) { print $alertsJS; } ?>
 
 // display mouse lat/long in page as mouse moves	 
