@@ -14,6 +14,7 @@
 #  Version 2.10 - 19-May-2019 - added display of County Zone alerts and map polygons (where provided)
 #  Version 2.20 - 14-Jul-2020 - switched to geo+json from ld+json calls to api.weather.gov
 #  Version 2.30 - 20-Oct-2022 - added adjustment of -1,-1 to gridpoint forecast for problem WFOs
+#  Version 2.40 - 21-Jun-2024 - update for change in icon URLs in api.weather.gov JSON + alert links
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -214,7 +215,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.30 - 20-Oct-2022 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.40 - 21-Jun-2024 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -260,8 +261,8 @@ if(isset($_REQUEST['adj'])) {
 }
 
 # listing of current WFO gridpoint forecasts with +1,+1 offsets to correct  20-Oct-2022
-$offByOne = array('AFC','AER','ALU','AFG','AJK','BOX','CAE','DLH','FSD','HGX','HNX','LIX','LWX','MAF','MFR','MLB','MRX','MTR');
-	 
+#$offByOne = array('AFC','AER','ALU','AFG','AJK','BOX','CAE','DLH','FSD','HGX','HNX','LIX','LWX','MAF','MFR','MLB','MRX','MTR');
+$offByOne = array('NIL'); 
 $pointHTML = WXmap_fetchUrlWithoutHanging('https://api.weather.gov/points/'.$centerlat.','.$centerlong);
 	$long = round($centerlong,4);
 	$lat  = round($centerlat,4);
@@ -294,7 +295,11 @@ if($lastRC == '200') { // got a good return .. process
 	$gridPointMeta = $ngpID.'/'.$ngpX.','.$ngpY;
 	           
 	$fcstZoneURL = $pointJSON['forecastZone'];
+	$fcstZone = get_zone($fcstZoneURL);
 	$countyZoneURL = $pointJSON['county'];
+	$countyZone = get_zone($countyZoneURL);
+	$fireZoneURL = $pointJSON['fireWeatherZone'];
+	$fireZone = get_zone($fireZoneURL);
 	$cityname = $pointJSON['relativeLocation']['properties']['city'];
 	$statename= $pointJSON['relativeLocation']['properties']['state'];
 	$TZ       = $pointJSON['timeZone'];
@@ -380,7 +385,8 @@ if(isset($fcstURL)) { // try only if the gridpoint URL was found
 	}
 }
 
-list($alertsList,$alertsJS) = WXmap_get_alerts($countyZoneURL);
+list($alertsList,$alertsJS) = WXmap_get_alerts($countyZoneURL,$fcstZone,$countyZone,$fireZone,$centerlat,$centerlong,
+      "$cityname $statename");
 
 if(!isset($zoom)) {$zoom = 11;}
 print $Status;
@@ -466,6 +472,8 @@ $nightStyle = 'vertical-align: top; border:solid 4px #006699; width: 311px; back
 
 if(isset($gridpointJSON['periods'][0])) { // only generate if we have data
 
+load_lookups();
+
 for ($i=0;$i<count($gridpointJSON['periods']);$i=$i+2)  {
 	$Pa = $gridpointJSON['periods'][$i];
 	$Pb = $gridpointJSON['periods'][$i+1];
@@ -495,6 +503,10 @@ for ($i=0;$i<count($gridpointJSON['periods']);$i=$i+2)  {
   <td style="<?php echo $tdStyle; ?>">
     <div style="text-align: center; font-size:110%; padding: 6px 0px 16px 0px;"><i>"<?php echo $Pa['shortForecast']; ?>"</i></div>
     <div style="vertical-align: top; padding: 0px 8px 0px 8px; text-align: justify">
+    <?php
+		  if(substr($Pa['icon'],0,4) !== 'http') {$Pa['icon'] = convert_icon($Pa['icon']); }
+		  if(substr($Pb['icon'],0,4) !== 'http') {$Pb['icon'] = convert_icon($Pb['icon']); }
+		?>
     <img style="float: left; border-style: none; padding-right: 8px" src="<?php echo $Pa['icon']; ?>" height="86" width="86"
     alt="<?php echo $Pa['shortForecast']; ?>" title="<?php echo $Pa['detailedForecast']; ?>"/>
     <div>
@@ -880,14 +892,15 @@ function WXmap_fetch_microtime()
 
 // ------------------------------------------------------------------------------------------
 
-function WXmap_get_alerts($countyURL) {
+function WXmap_get_alerts($countyURL,$warnZone,$countyZone,$fireZone,$lat,$long,$locName) {
+	# https://forecast.weather.gov/showsigwx.php?warnzone=MNZ083&warncounty=MNC013&firewxzone=MNZ083&lat=44.1661&lon=-94.0054
 	# get/decode the alerts (if any) and return 
 	# strings $alertsList for display and $alertsJS for polygons on the map
 	$alertURL = str_replace('zones/county','alerts/active/zone',$countyURL);
 	global $Status,$doDebug;
 	
 	$Status .= "<!-- fetching County alerts -->\n";
-	
+	$linkURL = "https://forecast.weather.gov/showsigwx.php?warnzone={$warnZone}&warncounty={$countyZone}&firewxzone={$fireZone}&lat={$lat}&lon={$long}&local_place1=".urlencode($locName);
   $alertHTML = WXmap_fetchUrlWithoutHanging($alertURL);
   $stuff = explode("\r\n\r\n",$alertHTML); // maybe we have more than one header due to redirects.
   $content = (string)array_pop($stuff); // last one is the content
@@ -918,9 +931,13 @@ function WXmap_get_alerts($countyURL) {
 	$A = "";
 	$JS = '';
   $colors = array('#DF0101','#F79F81','#F2F5A9','#0174DF','#58FAD0',
-                  '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC');
-	
-	foreach($AJSON['features'] as $i => $rJ) {
+                  '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC',
+                  '#DF0101','#F79F81','#F2F5A9','#0174DF','#58FAD0',
+                  '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC',
+                  '#DF0101','#F79F81','#F2F5A9','#0174DF','#58FAD0',
+                  '#FACC2E','#01DF01','#F7BE81','#FE2E64','#E0F8EC'
+									);
+		foreach($AJSON['features'] as $i => $rJ) {
 		$J = $rJ['properties'];
 		if(isset($J['expires'])) {
 			$exp = strtotime($J['expires']);
@@ -937,7 +954,8 @@ function WXmap_get_alerts($countyURL) {
 			$desc = $J['description'];
 			$headline = preg_replace('| by .*$|i','',$J['headline']);
 			$product = $J['id'];
-			$url = NWS_DETAIL_PRODUCT_URL.$product;
+#			$url = NWS_DETAIL_PRODUCT_URL.$product;
+			$url = $linkURL;
 			$A .= '<b><a href="'.$url.'" title="'.$desc.'">'.$headline."</a></b><br/>\n";
 			$Status .= "<!-- alert $i='".$J['headline']."' found expires='".$J['expires']."' -->\n";
 		}
@@ -949,11 +967,11 @@ function WXmap_get_alerts($countyURL) {
 					$poly[] = $coords[0].' '.$coords[1];
 				}
 				
-				$Status .= "<!-- alert poly \n".var_export($poly,true)." -->\n";
+				$Status .= "<!-- alert poly cs=$i \n".var_export($poly,true)." -->\n";
 				$cs = $i;
         $cc = count($colors);
         if(!isset($colors[$cs])) {$tr = range(0,$cs); shuffle($tr); $cs = $tr[0];}
-        $rc = $colors[$cs];
+        $rc = isset($colors[$cs])?$colors[$cs]:$colors[1];
 				$id = $i+1;
 $JS .= '					
   var poly'.$id.' = [
@@ -994,3 +1012,310 @@ $JS .= '
 	
 	return(array($A,$JS));
 }
+
+// ------------------------------------------------------------------------------------------
+
+function convert_icon($icon)
+{
+
+  // input: /icons/land/day/rain_showers,20/sct,20?size=medium
+  //        /icons/land/night/sct?size=medium
+	//
+  // output: {iconDir}{icon}{$iconType} or
+  //         DualImage.php?i={lefticon}&j={righticon}&ip={leftpop}&jp={rightpop}
+
+  global $Status, $NWSICONLIST;
+	$iconDir = 'https://forecast.weather.gov/newimages/medium/';
+	$dualImageDir = 'https://forecast.weather.gov/';
+	$iconType = '.png';
+	$iconHeight = '86';
+	$iconWidth  = '86';
+	
+  $newicon = $icon; // for testing
+  $uparts = parse_url($icon);
+  $iparts = array_slice(explode('/', $uparts['path']) , 3); //get day|night/icon[/icon]
+
+  // $Status .= "<!-- iparts \n".print_r($iparts,true)." -->\n";
+
+  $daynight = ($iparts[0] == 'day') ? '' : 'night/';
+  list($icon1, $pop1) = explode(',', $iparts[1] . ',');
+  $doDual = false;
+  if (isset($iparts[2])) {
+    $doDual = true;
+    list($icon2, $pop2) = explode(',', $iparts[2] . ',');
+  }
+  else {
+    $icon2 = '';
+    $pop2 = '';
+  }
+
+  // convert new API icon names to old image names
+
+  if (isset($NWSICONLIST["{$daynight}{$icon1}"])) {
+    list($nicon1, $rest) = explode('|', $NWSICONLIST["{$daynight}{$icon1}"]);
+    $icon1 = $nicon1;
+  }
+  else {
+    $Status.= "<!-- icon1='$icon1' not found - na used instead -->\n";
+    $icon1 = 'na';
+  }
+
+  if ($icon2 <> '') {
+    if (isset($NWSICONLIST["{$daynight}{$icon2}"])) {
+      list($nicon2, $rest) = explode('|', $NWSICONLIST["{$daynight}{$icon2}"]);
+      $icon2 = $nicon2;
+    }
+    else {
+      $Status.= "<!-- icon2='$icon2' not found - na used instead -->\n";
+      $icon2 = 'na';
+    }
+  }
+
+  //  $Status .= "<!-- doDual='$doDual' DualImageAvailable='$DualImageAvailable' icon1=$icon1 icon2=$icon2 -->\n";
+
+  if ($pop2 !== '') { // generate the DualImage.php script calling sequence for image
+    $newicon = "{$dualImageDir}DualImage.php?";
+    $newicon.= "i=$icon1";
+    if ($pop1 <> '') {
+      $newicon.= "&ip=$pop1";
+    }
+
+    $newicon.= "&j=$icon2";
+    if ($pop2 <> '') {
+      $newicon.= "&jp=$pop2";
+    }
+
+    $Status.= "<!-- dual image '$newicon' used-->\n";
+  }
+  elseif ($pop1 !== '') { // use the image as-is
+    $newicon = "{$iconDir}{$icon1}{$pop1}{$iconType}";
+  }
+  else {
+    $newicon = "{$iconDir}{$icon1}{$iconType}";
+  }
+
+  return ($newicon);
+} // end convert_to_local_icon
+
+// ------------------------------------------------------------------------------------------
+
+function get_zone($zoneURL) {
+	# extract Zone from end of URL
+	$p = explode('/',$zoneURL);
+	return(array_pop($p));
+}
+// ------------------------------------------------------------------------------------------
+
+function load_lookups()
+{
+
+  // static lookup arrays
+
+  global $fcstPeriods, $NWSICONLIST;
+  $fcstPeriods = array( // for filling in the '<period> Through <period>' zone forecasts.
+    'Monday',
+    'Monday Night',
+    'Tuesday',
+    'Tuesday Night',
+    'Wednesday',
+    'Wednesday Night',
+    'Thursday',
+    'Thursday Night',
+    'Friday',
+    'Friday Night',
+    'Saturday',
+    'Saturday Night',
+    'Sunday',
+    'Sunday Night',
+    'Monday',
+    'Monday Night',
+    'Tuesday',
+    'Tuesday Night',
+    'Wednesday',
+    'Wednesday Night',
+    'Thursday',
+    'Thursday Night',
+    'Friday',
+    'Friday Night',
+    'Saturday',
+    'Saturday Night',
+    'Sunday',
+    'Sunday Night'
+  );
+  $NWSICONLIST = array(
+
+    //  index is new icon name
+    //  imagename is original image name (for which we have icons available)
+    //  PoP flag controls if PoP is written on output or not.
+    //  ScePosition controls if image is pulled from Left, Middle or Right of source image
+    //  Text Name - optional, just a reminder of what it means
+    //  imgname | PoP?=[YN] | ScePosition=[LMR] | Text Name (optional)
+
+    'bkn' => 'bkn|N|L|Broken Clouds',
+    'night/bkn' => 'nbkn|N|L|Night Broken Clouds',
+    'blizzard' => 'blizzard|Y|L|Blizzard',
+    'night/blizzard' => 'nblizzard|Y|L|Night Blizzard',
+    'cold' => 'cold|Y|L|Cold',
+    'night/cold' => 'cold|Y|L|Cold',
+
+    //  'cloudy' =>  'cloudy|Y|L|Overcast (old cloudy)',
+
+    'dust' => 'du|N|22|Dust',
+    'night/dust' => 'ndu|N|22|Night Dust',
+
+    //  'fc' =>  'fc|N|L|Funnel Cloud',
+    //  'nsvrtsra' =>  'nsvrtsra|N|L|Funnel Cloud (old)',
+
+    'few' => 'few|Y|L|Few Clouds',
+    'night/few' => 'nfew|Y|L|Night Few Clouds',
+
+    //  'fg' =>  'fg|N|R|Fog',
+    //  'br' =>  'br|Y|R|Fog / mist old',
+    //  'fu' =>  'fu|N|L|Smoke',
+
+    'fog' => 'fg|N|R|Fog',
+
+    'night/fog' => 'nfg|N|R|Night Fog',
+    'fzra' => 'fzra|Y|L|Freezing rain',
+    'night/fzra' => 'nfzra|Y|L|Night Freezing Rain',
+
+    //  'fzrara' =>  'fzrara|Y|L|Rain/Freezing Rain (old)',
+
+    'snow_fzra' => 'fzra_sn|Y|L|Freezing Rain/Snow',
+    'night/snow_fzra' => 'nfzra_sn|Y|L|Night Freezing Rain/Snow',
+
+    //  'mix' =>  'mix|Y|L|Freezing Rain/Snow',
+    //  'hi_bkn' =>  'hi_bkn|Y|L|Broken Clouds (old)',
+    //  'hi_few' =>  'hi_few|Y|L|Few Clouds (old)',
+    //  'hi_sct' =>  'hi_sct|N|L|Scattered Clouds (old)',
+    //  'hi_skc' =>  'hi_skc|N|L|Clear Sky (old)',
+    //  'hi_nbkn' =>  'hi_nbkn|Y|L|Night Broken Clouds (old)',
+    //  'hi_nfew' =>  'hi_nfew|Y|L|Night Few Clouds (old)',
+    //  'hi_nsct' =>  'hi_nsct|N|L|Night Scattered Clouds (old)',
+    //  'hi_nskc' =>  'hi_nskc|N|L|Night Clear Sky (old)',
+    //  'hi_nshwrs' =>  'hi_nshwrs|Y|R|Night Showers',
+    //  'hi_ntsra' =>  'hi_ntsra|Y|L|Night Thunderstorm',
+    //  'hi_shwrs' =>  'hi_shwrs|Y|R|Showers',
+    //  'hi_tsra' =>  'hi_tsra|Y|L|Thunderstorm',
+
+    'hur_warn' => 'hur_warn|N|L|Hurrican Warning',
+    'night/hur_warn' => 'hur_warn|N|L|Hurrican Warning',
+    "hurr_warn" => "hurr|N|L|Hurricane warning", // New NWS list
+    "night/hurr_warn" => "hurr|N|L|Night Hurricane warning", // New NWS list
+    'hur_watch' => 'hur_watch|N|L|Hurricane Watch',
+    'night/hur_watch' => 'hur_watch|N|L|Hurricane Watch',
+    "hurr_watch" => "hurr-noh|N|L|Hurricane watch", // New NWS list
+    "night/hurr_watch" => "hurr-noh|N|L|Night Hurricane watch", // New NWS list
+    'hurricane' =>  'hurr-noh|Y|L|Hurricane',
+    'night/hurricane' =>  'hurr-noh|Y|L|Hurricane',
+    //  'hurr' =>  'hurr|N|L|Hurrican Warning old',
+    //  'hurr-noh' =>  'hurr-noh|N|L|Hurricane Watch old',
+
+    'hazy' => 'hz|N|L|Haze',
+    'night/hazy' => 'hz|N|L|Haze',
+    "haze" => "hz|N|L|Haze", // New NWS list
+    "night/haze" => "hz|N|L|Night Haze", // New NWS list
+
+    //  'hazy' =>  'hazy|N|L|Haze old',
+
+    'hot' => 'hot|N|R|Hot',
+    'night/hot' => 'hot|N|R|Hot',
+    'sleet' => 'ip|Y|L|Ice Pellets',
+    'night/sleet' => 'nip|Y|L|Night Ice Pellets',
+
+    //  'minus_ra' =>  'minus_ra|Y|L|Stopped Raining',
+    //  'ra1' =>  'ra1|N|L|Stopped Raining (old)',
+    //  'mist' =>  'mist|N|R|Mist (fog) (old)',
+    //  'ncloudy' =>  'ncloudy|Y|L|Overcast night(old ncloudy)',
+    //  'ndu' =>  'ndu|N|M|Night Dust',
+    //  'nfc' =>  'nfc|N|L|Night Funnel Cloud',
+    //  'nbr' =>  'nbr|Y|R|Night Fog/mist (old)',
+    //  'nfu' =>  'nfu|N|L|Night Smoke',
+    //  'nmix' =>  'nmix|Y|30|Night Freezing Rain/Snow (old)',
+    //  'nrasn' =>  'nrasn|Y|M|Night Snow (old)',
+    //  'pcloudyn' =>  'pcloudyn|Y|L|Night Partly Cloudy (old)',
+    //  'nscttsra' =>  'nscttsra|Y|M|Night Scattered Thunderstorm',
+    //  'nsn_ip' =>  'nsn_ip|Y|L|Night Snow/Ice Pellets (old)',
+    //  'nwind' =>  'nwind|N|5|Night Windy/Clear (old)',
+
+    'ovc' => 'ovc|N|L|Overcast',
+    'night/ovc' => 'novc|N|L|Night Overcast',
+    'rain' => 'ra|Y|30|Rain',
+    'night/rain' => 'nra|Y|30|Night Rain',
+    'rain_showers' => 'shra|Y|12|Rain Showers',
+    'night/rain_showers' => 'nshra|Y|12|Night Rain Showers',
+    "rain_showers_hi" => "hi_shwrs|Y|45|Rain showers (low cloud cover)", // New NWS list
+    "night/rain_showers_hi" => "hi_nshwrs|Y|45|Night Rain showers (low cloud cover)", // New NWS list
+    'rain_sleet' => 'raip|Y|M|Rain/Ice Pellets',
+    'night/rain_sleet' => 'nraip|Y|M|Night Rain/Ice Pellets',
+    'rain_fzra' => 'ra_fzra|Y|30|Rain/Freezing Rain',
+    'night/rain_fzra' => 'nra_fzra|Y|30|Night Freezing Rain',
+    'rain_snow' => 'ra_sn|Y|22|Rain/Snow',
+    'night/rain_snow' => 'nra_sn|Y|22|Night Rain/Snow',
+
+    //  'rasn' =>  'rasn|Y|M|Rain/Snow (old)',
+
+    'sct' => 'sct|N|L|name',
+    'night/sct' => 'nsct|N|L|Night Scattered Clouds',
+
+    //  'pcloudy' =>  'pcloudy|Y|L|Partly Cloudy (old)',
+    //  'scttsra' =>  'scttsra|Y|M|name',
+    //  'shra2' =>  'shra2|N|10|Rain Showers (old)',
+
+    'skc' => 'skc|N|L|Clear',
+    'night/skc' => 'nskc|N|L|Night Clear',
+    'snow' => 'sn|Y|L|Snow',
+    'night/snow' => 'nsn|Y|L|Night Snow',
+    'snow_sleet' => 'sn_ip|Y|L|Snow/Ice Pellets',
+    'night/snow_sleet' => 'nsn_ip|Y|L|Night Snow/Ice Pellets',
+    'smoke' => 'fu|N|L|Smoke',
+    'night/smoke' => 'nfu|N|L|Smoke', // NEW - Nov-2016
+
+    //  'sn_ip' =>  'sn_ip|Y|L|Snow/Ice Pellets (old)',
+    //  'tcu' =>  'tcu|N|L|Towering Cumulus (old)',
+
+    'tornado' => 'tor|N|L|Tornado',
+    'night/tornado' => 'ntor|N|L|Night Tornado',
+    'tsra' => 'tsra|Y|10|Thunderstorm',
+    'night/tsra' => 'ntsra|Y|10|Night Thunderstorm',
+    "tsra_sct" => "scttsra|Y|20|Thunderstorm (medium cloud cover)", // New NWS list
+    "night/tsra_sct" => "nscttsra|Y|20|Night Thunderstorm (medium cloud cover)", // New NWS list
+    "tsra_hi" => "hi_tsra|Y|L|Thunderstorm (low cloud cover)", // New NWS list
+    "night/tsra_hi" => "hi_ntsra|Y|L|Night Thunderstorm (low cloud cover)", // New NWS list
+
+    //  'tstormn' =>  'tstormn|N|L|Thunderstorm night (old)',
+    //  'ts_nowarn' =>  'ts_nowarn|N|L|Tropical Storm',
+
+    "ts_hurr_warn" => "ts_hur_flags|N|L|Tropical storm with hurricane warning in effect", // New NWS list
+    "night/ts_hurr_warn" => "ts_hur_flags|N|L|Night Tropical storm with hurricane warning in effect", // New NWS list
+		'tropical_storm' => 'tropstorm-noh|Y|L|Tropical Storm Warning',
+		'night/tropical_storm' => 'tropstorm-noh|Y|L|Tropical Storm Warning',
+    'ts_warn' => 'tropstorm|Y|L|Tropical Storm Warning',
+    'night/ts_warn' => 'tropstorm|Y|L|Tropical Storm Warning',
+
+    //  'tropstorm-noh' =>  'tropstorm-noh|N|L|Tropical Storm old',
+    //  'tropstorm' =>  'tropstorm|N|L|Tropical Storm Warning old',
+
+    'ts_watch' => 'tropstorm-noh|Y|L|Tropical Storm Watch',
+    'night/ts_watch' => 'tropstorm-noh|Y|L|Tropical Storm Watch',
+
+    //  'ts_hur_flags' =>  'ts_hur_flags|Y|L|Hurrican Warning old',
+    //  'ts_no_flag' =>  'ts_no_flag|Y|L|Tropical Storm old',
+
+    'wind_bkn' => 'wind_bkn|N|7|Windy/Broken Clouds',
+    'night/wind_bkn' => 'nwind_bkn|N|7|Night Windy/Broken Clouds',
+    'wind_few' => 'wind_few|N|7|Windy/Few Clouds',
+    'night/wind_few' => 'nwind_few|N|7|Night Windy/Few Clouds',
+    'wind_ovc' => 'wind_ovc|N|7|Windy/Overcast',
+    'night/wind_ovc' => 'nwind_ovc|N|7|Night Windy/Overcast',
+    'wind_sct' => 'wind_sct|N|7|Windy/Scattered Clouds',
+    'night/wind_sct' => 'nwind_sct|N|7|Night Windy/Scattered Clouds',
+    'wind_skc' => 'wind_skc|N|7|Windy/Clear',
+    'night/wind_skc' => 'nwind_skc|N|7|Night Windy/Clear',
+
+    //  'wind' =>  'wind|N|L|Windy/Clear (old)',
+
+    'na' => 'na|N|L|Not Available',
+  );
+} // end load_lookups function
+
