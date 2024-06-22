@@ -15,6 +15,7 @@
 #  Version 2.20 - 14-Jul-2020 - switched to geo+json from ld+json calls to api.weather.gov
 #  Version 2.30 - 20-Oct-2022 - added adjustment of -1,-1 to gridpoint forecast for problem WFOs
 #  Version 2.40 - 21-Jun-2024 - update for change in icon URLs in api.weather.gov JSON + alert links
+#  Version 2.41 - 22-Jun-2024 - fix for missing global for $NWSICONLIST+colors for polygon displays
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -215,7 +216,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.40 - 21-Jun-2024 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.41 - 22-Jun-2024 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -472,6 +473,7 @@ $nightStyle = 'vertical-align: top; border:solid 4px #006699; width: 311px; back
 
 if(isset($gridpointJSON['periods'][0])) { // only generate if we have data
 
+global $NWSICONLIST;
 load_lookups();
 
 for ($i=0;$i<count($gridpointJSON['periods']);$i=$i+2)  {
@@ -963,7 +965,7 @@ function WXmap_get_alerts($countyURL,$warnZone,$countyZone,$fireZone,$lat,$long,
 		if(isset($rJ['geometry']['coordinates'][0])) {
 			if(true or preg_match('|POLYGON\(\(([^\)]+)\)\)|i',$J['geometry'],$m)) {
 				$poly = array();
-				foreach ($rJ['geometry']['coordinates'][0] as $i => $coords) {
+				foreach ($rJ['geometry']['coordinates'][0] as $ii => $coords) {
 					$poly[] = $coords[0].' '.$coords[1];
 				}
 				
