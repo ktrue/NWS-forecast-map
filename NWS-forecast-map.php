@@ -16,6 +16,7 @@
 #  Version 2.30 - 20-Oct-2022 - added adjustment of -1,-1 to gridpoint forecast for problem WFOs
 #  Version 2.40 - 21-Jun-2024 - update for change in icon URLs in api.weather.gov JSON + alert links
 #  Version 2.41 - 22-Jun-2024 - fix for missing global for $NWSICONLIST+colors for polygon displays
+#  Version 2.42 - 21-May-2026 - fixes fpr PHP 8.5
 #
 #################################################################################
 #  error_reporting(E_ALL);  // uncomment to turn on full error reporting
@@ -86,20 +87,26 @@ $SITE['mapboxAPIkey'] = '-replace-this-with-your-API-key-here-';
 	
 # end of settings -------------------------------------------------------------
 
-if (isset($_REQUEST['sce']) && strtolower($_REQUEST['sce']) == 'view' ) {
+if (isset($_REQUEST['sce']) && strtolower($_REQUEST['sce']) == 'view' 
+    and strlen($_REQUEST['sce']) == 4) {
    //--self downloader --
    $filenameReal = __FILE__;
    $download_size = filesize($filenameReal);
    header('Pragma: public');
    header('Cache-Control: private');
    header('Cache-Control: no-cache, must-revalidate');
-   header("Content-type: text/plain;charset=ISO-8859-1");
+   header("Content-type: text/plain");
    header("Accept-Ranges: bytes");
    header("Content-Length: $download_size");
    header('Connection: close');
    
    readfile($filenameReal);
    exit;
+}
+if (isset($_REQUEST['sce'])) {
+  header("HTTP/1.1 403 Forbidden");
+  print "<h1>Hacking attempt. Denied.</h1>\n";
+  exit();
 }
 // overrides from Settings.php if available
 // if(file_exists("Settings.php")) {include_once("Settings.php");}
@@ -216,7 +223,7 @@ $zoom = $mapZoomDefault;
 global $Status;
 $errorMessage = '';
  
-$Status = "<!-- NWS-forecast-map.php - V2.41 - 22-Jun-2024 -->\n";
+$Status = "<!-- NWS-forecast-map.php - V2.42 - 21-May-2026 -->\n";
 
 if(isset($_REQUEST['zoom']) and is_numeric($_REQUEST['zoom'])) {
 	$zoom = $_REQUEST['zoom'];
@@ -819,7 +826,7 @@ function WXmap_fetchUrlWithoutHanging($inurl)
 
     // $Status .= "<!-- curl info\n".print_r($cinfo,true)." -->\n";
 
-    curl_close($ch); // close the cURL session
+    if(PHP_MAJOR_VERSION < 8) {curl_close($ch); }// close the cURL session
 
     // $Status .= "<!-- raw data\n".$data."\n -->\n";
     $stuff = explode("\r\n\r\n",$data); // maybe we have more than one header due to redirects.
